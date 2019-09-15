@@ -1,4 +1,6 @@
-<?php
+<!-- Response file only to test API response -->
+
+<!-- <?php
 
 require_once('response.php');
 
@@ -9,4 +11,4 @@ $response->addMessage("First Text Ok");
 $response->addMessage("Second Text Ok");
 $response->send();
 
- ?>
+ ?> -->
