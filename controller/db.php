@@ -1,5 +1,7 @@
 <?php
 
+//<!-- Remember that Code Igniter Framework can be used to help deal with other security issues -->
+
 class DB {
 
   private static $writeDBConnection;
