@@ -99,7 +99,39 @@
     }
 
     elseif ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
-      // code...
+
+      try{
+        $query = $writeDB->prepare('Delete from tasks where id = :taskid');
+        $query->BindParam(':taskid', $taskid, PDO::PARAM_INT);
+        $query->execute();
+
+        $rowCount = $query->rowCount();
+
+        if ($rowCount === 0){
+          $response = new Response();
+          $response->setHttpStatusCode(404);
+          $response->setSucess(false);
+          $response->addMessage("Task not found");
+          $response->send();
+          exit;
+        }
+
+        $response = new Response();
+        $response->setHttpStatusCode(200);
+        $response->setSucess(true);
+        $response->addMessage("Task Deleted");
+        $response->send();
+        exit;
+      }
+
+      catch(PDOException $sex){
+        $response = new Response();
+        $response->setHttpStatusCode(500);
+        $response->setSucess(false);
+        $response->addMessage("Failed to deleted task");
+        $response->send();
+        exit;
+      }
     }
 
 
