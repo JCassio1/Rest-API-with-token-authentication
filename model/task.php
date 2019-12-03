@@ -40,15 +40,13 @@ class Task{
     return $this->_completed;
   }
 
-  public function setID($id){
+  public function setID($id) {
 
-    //if entered if not null and not numeric or lower than zero or higher then max or the task already has an id
-    if(($id !== null) && (!is_numeric($id)) || $id <= 0 || $id > 9223372036854775807 || $this->_id !== null){
-      throw new TaskException("Task ID Error");
-    }
-
-    $this->_id = $id;
-  }
+		if(($id !== null) && (!is_numeric($id) || $id <= 0 || $id > 9223372036854775807 || $this->_id !== null)) {
+			throw new TaskException("Task ID error");
+		}
+		$this->_id = $id;
+	}
 
   public function setTitle($title){
 

@@ -403,6 +403,122 @@ elseif(empty($_GET)){
 
   elseif($_SERVER['REQUEST_METHOD'] === 'POST'){
 
+    try{
+
+      if($_SERVER['CONTENT_TYPE'] !== 'application/json') {
+        $response = new Response();
+        $response->setHttpStatusCode(400);
+        $response->setSucess(false);
+        $response->addMessage("Content type does not correspond to JSON Format");
+        $response->send();
+        exit;
+      }
+
+      $rawPOSTData = file_get_contents('php://input'); //it reads and inspects the CONTENT_TYPE
+
+      if(!$jsonData = json_decode($rawPOSTData)){
+        $response = new Response();
+        $response->setHttpStatusCode(400);
+        $response->setSucess(false);
+        $response->addMessage("Request content type does not correspond to JSON Format");
+        $response->send();
+        exit;
+      }
+
+      if(!isset($jsonData->title) || !isset($jsonData->completed)){ //isset verifies the existence of the json values keys
+        $response = new Response();
+        $response->setHttpStatusCode(400);
+        $response->setSucess(false);
+        (!isset($jsonData->title) ? $response->addMessage("Title field is mandatory and must be provided") : false);
+        (!isset($jsonData->completed) ? $response->addMessage("Completed field is mandatory and must be provided") : false);
+        $response->send();
+        exit;
+      }
+
+      $newTask = new Task(null, $jsonData->title, (isset($jsonData->description) ? $jsonData->description : null), (isset($jsonData->deadline) ? $jsonData->deadline : null), $jsonData->completed);
+
+      $title = $newTask->getTitle();
+      $description = $newTask->getDescription();
+      $deadline = $newTask->getDeadline();
+      $completed = $newTask->getCompleted();
+
+      $query = $writeDB->prepare('insert into tasks (title, description, deadline, completed) values (:title, :description, STR_TO_DATE(:deadline, \'%d/%m/%Y %H:%i\'), :completed)');
+
+      $query->bindParam(':title', $title, PDO::PARAM_STR);
+      $query->bindParam(':description', $description, PDO::PARAM_STR);
+      $query->bindParam(':deadline', $deadline, PDO::PARAM_STR);
+      $query->bindParam(':completed', $completed, PDO::PARAM_STR);
+      $query->execute();
+
+      $rowCount = $query->rowCount();
+
+      if($rowCount === 0){
+        $response = new Response();
+        $response->setHttpStatusCode(500);
+        $response->setSucess(false);
+        $response->addMessage("Failed to create tasks");
+        $response->send();
+        exit;
+      }
+
+      $lastTaskID = $writeDB->lastInsertId(); //Gets tasksID only from the current user session
+
+      // TaskID is retrieved from the writeDB because it is asynchronous and the readDB might not have had the data available to retrieve yet
+      $query = $writeDB->prepare('select id, title, description, DATE_FORMAT(deadline, "%d/%m/%Y %H:%i") as deadline, completed from tasks where id = :taskid');
+      $query->bindParam(':taskid', $lastTaskID, PDO::PARAM_INT);
+      $query->execute();
+
+      $rowCount = $query->rowCount();
+
+      if($rowCount === 0){
+        $response = new Response();
+        $response->setHttpStatusCode(500);
+        $response->setSucess(false);
+        $response->addMessage("Not able to retrieve task after creation");
+        $response->send();
+        exit;
+      }
+
+      $taskArray = array();
+
+      while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
+        $task = new Task($row['id'], $row['title'], $row['description'], $row['deadline'], $row['completed']);
+      }
+
+      $taskArray[] = $task->returnTaskAsArray();
+
+      $returnData = array();
+      $returnData['rows_returned'] = $rowCount;
+      $returnData['tasks'] = $taskArray;
+
+      $response = new Response();
+      $response->setHttpStatusCode(201); //something has been created
+      $response->setSucess(true);
+      $response->addMessage("Task created");
+      $response->setData($returnData);
+      $response->send();
+      exit;
+
+    }
+
+     catch(TaskException $ex){
+       $response = new Response();
+       $response->setHttpStatusCode(400);
+       $response->setSucess(false);
+       $response->addMessage($ex->getMessage());
+       $response->send();
+       exit;
+     }
+     catch(PDOException $ex){
+       error_log("Database query error -".$ex, 0);
+       $response = new Response();
+       $response->setHttpStatusCode(500);
+       $response->setSucess(false);
+       $response->addMessage("Failed to insert task to database. Check Metadata for error");
+       $response->send();
+       exit;
+     }
+
   }
 
   else{
