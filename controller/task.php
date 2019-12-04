@@ -22,7 +22,6 @@
 
 
 
-
   if(array_key_exists("taskid", $_GET)) {
 
 
@@ -82,7 +81,7 @@
         $response->setSucess(false);
         $response->addMessage($ex->getMessage());
         $response->send();
-        exit();
+        exit;
       }
 
       catch(PDOException $ex){
@@ -92,7 +91,7 @@
         $response->setSucess(false);
         $response->addMessage("Database Connection Error");
         $response->send();
-        exit();
+        exit;
       }
 
     }
@@ -135,7 +134,186 @@
 
 
   elseif ($_SERVER['REQUEST_METHOD'] === 'PATCH') {
-      // code...
+
+    try{
+
+      if($_SERVER['CONTENT_TYPE'] !== 'application/json') {
+        $response = new response();
+        $response->setHttpStatusCode(400);
+        $response->setSucess(false);
+        $response->addMessage("Content type header not set to JSON. #ErrorCode-200");
+        $response->send();
+        exit();
+      }
+
+      $rawPatchData = file_get_contents('php://input');
+
+      if(!$jsonData = json_decode($rawPatchData)) {
+        $response = new response();
+        $response->setHttpStatusCode(400);
+        $response->setSucess(false);
+        $response->addMessage("Rest body data is not valid JSON. #ErrorCode-300");
+        $response->send();
+        exit();
+      }
+
+      $title_updated = false;
+      $description_updated = false;
+      $deadline_updated = false;
+      $completed_updated = false;
+
+      $queryFields = "";
+
+      //Check which field were updated and passed in to the SQL HttpQueryString
+      if(isset($jsonData->title)){
+        $title_updated = true;
+        $queryFields .= "title = :title, "; //the '.=' keeps data that already exists in the variable and appends new data
+      }
+
+      if(isset($jsonData->description)){
+        $description_updated = true;
+        $queryFields .= "description = :description, ";
+      }
+
+      if(isset($jsonData->deadline)){
+        $deadline_updated = true;
+        $queryFields .= "deadline = STR_TO_DATE(:deadline, '%d/%m/%Y %H:%i'), ";
+      }
+
+      if(isset($jsonData->completed)){
+        $completed_updated = true;
+        $queryFields .= "completed = :completed, ";
+      }
+
+      $queryFields = rtrim($queryFields, ", "); //Remove the last comma and space
+
+      if($title_updated === false && $description_updated === false && $deadline_updated === false && $completed_updated === false){
+        $response = new response();
+        $response->setHttpStatusCode(400);
+        $response->setSucess(false);
+        $response->addMessage("No task field data has been provided");
+        $response->send();
+        exit();
+      }
+
+      $query = $writeDB->prepare('select id, title, description, DATE_FORMAT(deadline, "%d/%m/%Y %H:%i") as deadline, completed from tasks where id = :taskid');
+      $query->bindParam(':taskid', $taskid, PDO::PARAM_INT);
+      $query->execute();
+
+      $rowCount = $query->rowCount();
+
+      if($rowCount === 0){
+        $response = new response();
+        $response->setHttpStatusCode(404);
+        $response->setSucess(false);
+        $response->addMessage("No tasks found to update");
+        $response->send();
+        exit();
+      }
+
+      while($row = $query->fetch(PDO::FETCH_ASSOC)) {
+        $task = new Task($row['id'], $row['title'], $row['description'], $row['deadline'], $row['completed']);
+      }
+
+      $queryString = "update tasks set ".$queryFields." where id = :taskid";
+      $query = $writeDB->prepare($queryString);
+
+      if($title_updated === true){
+        $task->setTitle($jsonData->title);
+        $up_title = $task->getTitle();
+        $query->bindParam(':title', $up_title, PDO::PARAM_STR);
+      }
+
+      if($description_updated === true){
+        $task->setDescription($jsonData->description);
+        $up_description = $task->getDescription();
+        $query->bindParam(':description', $up_description, PDO::PARAM_STR);
+      }
+
+      if($deadline_updated === true){
+        $task->setDeadline($jsonData->deadline);
+        $up_deadline = $task->getDeadline();
+        $query->bindParam(':deadline', $up_deadline, PDO::PARAM_STR); //Even though its a date, it is passed as string
+      }
+
+      if($completed_updated === true){
+        $task->setCompleted($jsonData->completed);
+        $up_completed = $task->getCompleted();
+        $query->bindParam(':completed', $up_completed, PDO::PARAM_STR);
+      }
+
+      $query->bindParam(':taskid', $taskid, PDO::PARAM_INT);
+      $query->execute();
+
+      $rowCount = $query->rowCount();
+
+      if($rowCount === 0){
+        $response = new response();
+        $response->setHttpStatusCode(400);
+        $response->setSucess(false);
+        $response->addMessage("Task not updated");
+        $response->send();
+        exit();
+      }
+
+      //Retrieve updated task directly from Database
+      $query = $writeDB->prepare('select id, title, description, DATE_FORMAT(deadline, "%d/%m/%Y %H:%i") as deadline, completed from tasks where id = :taskid');
+      $query->bindParam(':taskid', $taskid, PDO::PARAM_INT);
+      $query->execute();
+
+      $rowCount = $query->rowCount();
+
+      if($rowCount === 0){
+        $response = new response();
+        $response->setHttpStatusCode(404);
+        $response->setSucess(false);
+        $response->addMessage("No task found after update #ErroCode-400");
+        $response->send();
+        exit();
+      }
+
+
+      $taskArray = array();
+
+      while($row = $query->fetch(PDO::FETCH_ASSOC)){
+        $task = new Task($row['id'], $row['title'], $row['description'], $row['deadline'], $row['completed']);
+        $taskArray[] = $task->returnTaskAsArray();
+      }
+
+      $returnData = array();
+      $returnData['rows_returned'] = $rowCount;
+      $returnData['tasks'] = $taskArray;
+
+      $response = new response();
+      $response->setHttpStatusCode(200);
+      $response->setSucess(true);
+      $response->addMessage("Task updated");
+      $response->setData($returnData);
+      $response->send();
+      exit();
+
+    }
+
+    //Task Exception is client issue because there is an error or incomplete in provided data
+    catch(TaskException $ex){
+        $response = new response();
+        $response->setHttpStatusCode(400);
+        $response->setSucess(false);
+        $response->addMessage($ex->getMessage());
+        $response->send();
+        exit;
+      }
+
+    //PDOException is a server error
+    catch(PDOException $ex){
+        error_log("Database query error -".$ex, 0);
+        $response = new Response();
+        $response->setHttpStatusCode(500);
+        $response->setSucess(false);
+        $response->addMessage("Failed to get tasks");
+        $response->send();
+        exit;
+      }
     }
 
     else {
@@ -539,8 +717,6 @@ else {
   $response->send();
   exit;
 }
-
-
 
 
  ?>
