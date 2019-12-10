@@ -62,7 +62,6 @@ class Response {
 
     echo json_encode($this->_responseData);
   }
-
 }
 
 
