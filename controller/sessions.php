@@ -87,7 +87,150 @@ if(array_key_exists("sessionid", $_GET)){
   }
 
   elseif ($_SERVER['REQUEST_METHOD'] === 'PATCH') {
-    // code...
+
+    if ($_SERVER['CONTENT_TYPE'] !== 'application/json') {
+      $response = new response();
+      $response->setHttpStatusCode(400);
+      $response->setSucess(false);
+      $response->addMessage("Content type data not set to JSON");
+      $response->send();
+      exit();
+    }
+
+    $rawPatchData = file_get_contents('php://input');
+
+    if (!$jsonData = json_decode($rawPatchData)) {
+      $response = new response();
+      $response->setHttpStatusCode(405);
+      $response->setSucess(false);
+      $response->addMessage("Request body is not valid JSON");
+      $response->send();
+      exit();
+    }
+
+    if (!isset($jsonData->refresh_token) || strlen($jsonData->refresh_token) < 1) {
+      $response = new response();
+      $response->setHttpStatusCode(405);
+      $response->setSucess(false);
+      (!isset($jsonData->refresh_token) ? $response->addMessage("Refresh token not supplied") : false);
+      (strlen($jsonData->refresh_token) < 1 ? $response->addMessage("Refresh token cannot be blank") : false);
+      $response->send();
+      exit();
+    }
+
+    try{
+
+      $refreshtoken = $jsonData->refresh_token;
+
+      //Performing a join on table sessions and users
+      $query = $writeDB->prepare('select sessions.id as sessionid, sessions.userId as userid, acessToken, refreshToken, useractive, loginattempts, acessTokenExpiry, refreshTokenExpiry from sessions, users where users.id = sessions.userId and sessions.id = :sessionid and sessions.acessToken = :accesstoken and sessions.refreshToken = :refreshtoken');
+      $query->bindParam(':sessionid', $sessionid, PDO::PARAM_INT);
+      $query->bindParam(':accesstoken', $accesstoken, PDO::PARAM_STR);
+      $query->bindParam(':refreshtoken', $refreshtoken, PDO::PARAM_STR);
+      $query->execute();
+
+      $rowCount = $query->rowCount();
+
+      if($rowCount === 0) {
+        $response = new response();
+        $response->setHttpStatusCode(401);
+        $response->setSucess(false);
+        $response->addMessage("Access token or refresh token is incorrect for session id");
+        $response->send();
+        exit();
+      }
+
+      $row = $query->fetch(PDO::FETCH_ASSOC);
+
+      $returned_sessionid = $row['sessionid'];
+      $returned_userid = $row['userid'];
+      $returned_accesstoken = $row['acessToken'];
+      $returned_refreshtoken = $row['refreshToken'];
+      $returned_useractive = $row['useractive'];
+      $returned_loginattempts = $row['loginattempts'];
+      $returned_accesstokenexpiry = $row['acessTokenExpiry'];
+      $returned_refreshtokenexpiry = $row['refreshTokenExpiry'];
+
+
+      if ($returned_useractive !== 'Y') {
+        $response = new response();
+        $response->setHttpStatusCode(401);
+        $response->setSucess(false);
+        $response->addMessage("User account is not active");
+        $response->send();
+        exit();
+      }
+
+      if ($returned_loginattempts >= 3) {
+        $response = new response();
+        $response->setHttpStatusCode(401);
+        $response->setSucess(false);
+        $response->addMessage("Login account is currently locked");
+        $response->send();
+        exit();
+      }
+
+      if (strtotime($returned_refreshtokenexpiry) < time()) {
+        $response = new response();
+        $response->setHttpStatusCode(401);
+        $response->setSucess(false);
+        $response->addMessage("Refresh token has expired. Please login again");
+        $response->send();
+        exit();
+      }
+
+      $accesstoken = base64_encode(bin2hex(openssl_random_pseudo_bytes(24)).time());
+      $refreshtoken = base64_encode(bin2hex(openssl_random_pseudo_bytes(24)).time());
+
+      $access_token_expiry_seconds = 1200; //20 minutes
+      $refresh_token_expiry_seconds = 1209600; //14 days
+
+      $query = $writeDB->prepare('update sessions set acessToken = :accesstoken, acessTokenExpiry = date_add(NOW(), INTERVAL :accesstokenexpiryseconds SECOND), refreshToken = :refreshtoken, refreshTokenExpiry = date_add(NOW(), INTERVAL :refreshtokenexpiryseconds SECOND) where id = :sessionid and userId = :userid and acessToken = :returnedaccesstoken and refreshToken = :returnedrefreshtoken');
+      $query->bindParam(':userid', $returned_userid, PDO::PARAM_INT);
+      $query->bindParam(':sessionid', $returned_sessionid, PDO::PARAM_INT);
+      $query->bindParam(':accesstoken', $accesstoken, PDO::PARAM_STR);
+      $query->bindParam(':accesstokenexpiryseconds', $access_token_expiry_seconds, PDO::PARAM_INT);
+      $query->bindParam(':refreshtoken', $refreshtoken, PDO::PARAM_STR);
+      $query->bindParam(':refreshtokenexpiryseconds', $refresh_token_expiry_seconds, PDO::PARAM_INT);
+      $query->bindParam(':returnedaccesstoken', $returned_accesstoken, PDO::PARAM_STR);
+      $query->bindParam(':returnedrefreshtoken', $returned_refreshtoken, PDO::PARAM_STR);
+      $query->execute();
+
+      $rowCount = $query->rowCount();
+
+      if ($rowCount === 0) {
+        $response = new response();
+        $response->setHttpStatusCode(401);
+        $response->setSucess(false);
+        $response->addMessage("Access token could not be refreshed. Please login again");
+        $response->send();
+        exit();
+      }
+
+      $returnData = array();
+      $returnData['session_id'] = $returned_sessionid;
+      $returnData['access_token'] = $accesstoken;
+      $returnData['access_token_expiry'] = $access_token_expiry_seconds;
+      $returnData['refresh_token'] = $refreshtoken;
+      $returnData['refresh_token_expiry'] = $refresh_token_expiry_seconds;
+
+      $response = new response();
+      $response->setHttpStatusCode(200);
+      $response->setSucess(true);
+      $response->addMessage("Token refreshed");
+      $response->setData($returnData);
+      $response->send();
+      exit();
+    }
+
+    catch(PDOException $ex){
+      $response = new response();
+      $response->setHttpStatusCode(500);
+      $response->setSucess(false);
+      $response->addMessage("There was an issue refreshing access token. Please login again");
+      $response->send();
+      exit();
+    }
   }
 
   else {
@@ -98,7 +241,6 @@ if(array_key_exists("sessionid", $_GET)){
     $response->send();
     exit();
   }
-
 }
 
 elseif(empty($_GET)){
@@ -119,7 +261,7 @@ elseif(empty($_GET)){
     $response = new response();
     $response->setHttpStatusCode(405);
     $response->setSucess(false);
-    $response->addMessage("Content Type header not set to JSON");
+    $response->addMessage("Content Type header not set to JSON #ErrorCode600");
     $response->send();
     exit();
   }
